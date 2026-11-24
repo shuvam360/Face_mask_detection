@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cache directories
+.keras/
+.pytest_cache/
+.streamlit/
+
+# Large Archives & Temp
+data.zip
+*.zip
+*.tar
+*.tar.gz
+
+# Test Output Images
+test_result_*.jpg
+output.jpg
+annotated_mask_detection.jpg
+
+# OS generated files
+.DS_Store
+Thumbs.db

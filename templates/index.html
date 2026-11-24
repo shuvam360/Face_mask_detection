@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Face Mask Detection Live Stream</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+        }
+        .navbar-custom {
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+        }
+        .card-custom {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 14px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .stream-container {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            min-height: 380px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #3b82f6;
+        }
+        .stream-img {
+            width: 100%;
+            height: auto;
+            max-height: 520px;
+            object-fit: contain;
+        }
+        .badge-status {
+            font-size: 0.9rem;
+            padding: 6px 12px;
+            border-radius: 20px;
+        }
+        .btn-action {
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
+        }
+        .stat-badge {
+            background: #334155;
+            padding: 10px 16px;
+            border-radius: 10px;
+            border-left: 4px solid #3b82f6;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark navbar-custom py-3">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+                <span class="fs-3">😷</span>
+                <div>
+                    <span class="fw-bold fs-5">Face Mask Detection AI</span>
+                    <span class="badge bg-primary ms-2">CNN MobileNetV2</span>
+                </div>
+            </a>
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-success badge-status"><i class="bi bi-broadcast me-1"></i> System Online</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container my-4">
+        <div class="row g-4">
+            <!-- Left Column: Live Stream & Controls -->
+            <div class="col-lg-8">
+                <div class="card card-custom p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="bi bi-camera-video me-2 text-primary"></i>Live Webcam Feed</h5>
+                        <span class="badge bg-secondary" id="stream-status">Streaming</span>
+                    </div>
+
+                    <div class="stream-container">
+                        <img id="videoStream" class="stream-img" src="/video_feed" alt="Webcam Feed Loading...">
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                        <div class="d-flex gap-2">
+                            <button id="toggleBtn" class="btn btn-primary btn-action" onclick="toggleStream()">
+                                <i class="bi bi-pause-fill me-1"></i> Pause Feed
+                            </button>
+                            <button class="btn btn-outline-light btn-action" onclick="refreshFeed()">
+                                <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                            </button>
+                        </div>
+                        <div class="text-secondary small">
+                            <i class="bi bi-info-circle me-1"></i> Bounding boxes automatically track and classify detected faces.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Image Upload & Analytics -->
+            <div class="col-lg-4">
+                <div class="card card-custom p-4 mb-4">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-upload me-2 text-primary"></i>Test Photo Upload</h5>
+                    <form id="uploadForm" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label class="form-label text-secondary small">Choose a photo from your computer:</label>
+                            <input class="form-control bg-dark text-white border-secondary" type="file" id="imageInput" accept="image/*" required>
+                        </div>
+                        <button type="submit" class="btn btn-success btn-action w-100" id="uploadBtn">
+                            <i class="bi bi-lightning-charge me-1"></i> Analyze Mask
+                        </button>
+                    </form>
+
+                    <!-- Upload Result Preview -->
+                    <div id="uploadResult" class="mt-3 d-none">
+                        <h6 class="text-secondary small fw-bold">Analysis Result:</h6>
+                        <img id="resultImage" class="w-100 rounded border border-secondary mb-2" src="" alt="Result">
+                        <div id="resultBadges" class="d-flex gap-2 flex-wrap"></div>
+                    </div>
+                </div>
+
+                <!-- Stats Card -->
+                <div class="card card-custom p-4">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Model Specs</h5>
+                    <div class="d-flex flex-column gap-2">
+                        <div class="stat-badge">
+                            <div class="text-secondary small">Test Accuracy</div>
+                            <div class="fs-4 fw-bold text-success">99.64%</div>
+                        </div>
+                        <div class="stat-badge">
+                            <div class="text-secondary small">Base Architecture</div>
+                            <div class="fw-semibold">MobileNetV2 (ImageNet)</div>
+                        </div>
+                        <div class="stat-badge">
+                            <div class="text-secondary small">Classes</div>
+                            <div class="fw-semibold text-info">Mask (Green) | No Mask (Red)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isStreaming = true;
+        const video = document.getElementById('videoStream');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const streamStatus = document.getElementById('stream-status');
+
+        function toggleStream() {
+            if (isStreaming) {
+                video.src = "";
+                toggleBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i> Resume Feed';
+                toggleBtn.classList.replace('btn-primary', 'btn-success');
+                streamStatus.innerText = 'Paused';
+                streamStatus.classList.replace('bg-secondary', 'bg-warning');
+                isStreaming = false;
+            } else {
+                video.src = "/video_feed";
+                toggleBtn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> Pause Feed';
+                toggleBtn.classList.replace('btn-success', 'btn-primary');
+                streamStatus.innerText = 'Streaming';
+                streamStatus.classList.replace('bg-warning', 'bg-secondary');
+                isStreaming = true;
+            }
+        }
+
+        function refreshFeed() {
+            video.src = "/video_feed?" + new Date().getTime();
+        }
+
+        // Image upload AJAX
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('imageInput');
+            if (!fileInput.files[0]) return;
+
+            const uploadBtn = document.getElementById('uploadBtn');
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Processing...';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/predict_image', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('resultImage').src = data.image_base64;
+                    const badgesContainer = document.getElementById('resultBadges');
+                    badgesContainer.innerHTML = '';
+                    
+                    data.faces.forEach((face, idx) => {
+                        const bgClass = face.label === 'Mask' ? 'bg-success' : 'bg-danger';
+                        badgesContainer.innerHTML += `<span class="badge ${bgClass}">Face ${idx+1}: ${face.label} (${(face.confidence*100).toFixed(1)}%)</span>`;
+                    });
+                    document.getElementById('uploadResult').classList.remove('d-none');
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (err) {
+                alert('Request failed: ' + err);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i> Analyze Mask';
+            }
+        });
+    </script>
+</body>
+</html>

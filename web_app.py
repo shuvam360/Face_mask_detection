@@ -1,0 +1,222 @@
+"""
+Flask Web Application for Real-Time Face Mask Detection.
+Features:
+- Browser-based Live Webcam Stream with bounding boxes & HUD metrics.
+- Photo Upload with instantaneous mask classification & bounding boxes.
+- Interactive Dashboard UI.
+
+Run with:
+    python web_app.py
+Then open http://localhost:5000 in your browser.
+"""
+
+import os
+import sys
+import io
+import base64
+import cv2
+import numpy as np
+from flask import Flask, render_template, Response, request, jsonify
+
+# Suppress TensorFlow logging
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+
+app = Flask(__name__)
+
+# Global Model & Cascade references
+MODEL = None
+FACE_CASCADE = None
+
+
+def init_ai():
+    global MODEL, FACE_CASCADE
+    # Load Model
+    candidate_paths = [
+        "mask_detector.h5",
+        "mask_detector.model.h5",
+        os.path.join("face-mask-detection", "mask_detector.h5")
+    ]
+    for p in candidate_paths:
+        if os.path.exists(p):
+            print(f"[INFO] Loading CNN Model from: {p}")
+            MODEL = load_model(p)
+            break
+    
+    # Load Cascade
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
+    print("[INFO] AI Models loaded successfully.")
+
+
+def draw_styled_label(frame, text, x, y, color, bg_color=None):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.6
+    thickness = 2
+    (text_w, text_h), baseline = cv2.getTextSize(text, font, scale, thickness)
+    margin = 4
+    box_y1 = max(0, y - text_h - 2 * margin)
+    box_y2 = y
+    box_x1 = x
+    box_x2 = x + text_w + 2 * margin
+    if bg_color is None:
+        bg_color = (20, 20, 20)
+    cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), bg_color, -1)
+    cv2.putText(frame, text, (box_x1 + margin, box_y2 - margin), font, scale, color, thickness, cv2.LINE_AA)
+
+
+def process_frame(frame):
+    """Processes a frame to detect faces and classify mask status."""
+    (h_frame, w_frame) = frame.shape[:2]
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    faces = FACE_CASCADE.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(50, 50),
+        flags=cv2.CASCADE_SCALE_IMAGE
+    )
+
+    faces_info = []
+
+    for (x, y, w, h) in faces:
+        x1, y1 = max(0, x), max(0, y)
+        x2, y2 = min(w_frame, x + w), min(h_frame, y + h)
+
+        face_roi = frame[y1:y2, x1:x2]
+        if face_roi.size == 0 or face_roi.shape[0] < 20 or face_roi.shape[1] < 20:
+            continue
+
+        face_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
+        face_resized = cv2.resize(face_rgb, (224, 224))
+        face_array = np.expand_dims(preprocess_input(face_resized.astype("float32")), axis=0)
+
+        preds = MODEL.predict(face_array, verbose=0)[0]
+        mask_prob, no_mask_prob = float(preds[0]), float(preds[1])
+
+        if mask_prob > no_mask_prob:
+            label = "Mask"
+            confidence = mask_prob
+            color = (0, 220, 0)
+        else:
+            label = "No Mask"
+            confidence = no_mask_prob
+            color = (0, 0, 230)
+
+        # Draw box and corners
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        line_len = int(min(w, h) * 0.2)
+        cv2.line(frame, (x1, y1), (x1 + line_len, y1), color, 3)
+        cv2.line(frame, (x1, y1), (x1, y1 + line_len), color, 3)
+        cv2.line(frame, (x2, y1), (x2 - line_len, y1), color, 3)
+        cv2.line(frame, (x2, y1), (x2, y1 + line_len), color, 3)
+        cv2.line(frame, (x1, y2), (x1 + line_len, y2), color, 3)
+        cv2.line(frame, (x1, y2), (x1, y2 - line_len), color, 3)
+        cv2.line(frame, (x2, y2), (x2 - line_len, y2), color, 3)
+        cv2.line(frame, (x2, y2), (x2 - line_len, y2), color, 3)
+
+        label_text = f"{label}: {confidence * 100:.1f}%"
+        draw_styled_label(frame, label_text, x1, max(24, y1 - 6), color)
+
+        faces_info.append({
+            "label": label,
+            "confidence": confidence,
+            "box": (x1, y1, x2, y2)
+        })
+
+    return frame, faces_info
+
+
+def generate_frames():
+    """Video streaming generator function."""
+    cap = cv2.VideoCapture(0)
+    
+    while True:
+        if cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                # If frame read failed, send placeholder
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(frame, "Webcam feed temporarily unavailable", (40, 240),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
+            else:
+                frame, _ = process_frame(frame)
+        else:
+            # Camera couldn't be opened
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(frame, "No webcam detected on device (Index 0)", (40, 240),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            cv2.putText(frame, "Upload a photo on the right to test detection", (40, 280),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
+
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/predict_image', methods=['POST'])
+def predict_image():
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'})
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'})
+
+    try:
+        in_memory_file = io.BytesIO()
+        file.save(in_memory_file)
+        data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return jsonify({'success': False, 'error': 'Invalid image format'})
+
+        processed_img, faces = process_frame(img)
+
+        # Fallback if no faces were caught by cascade
+        if len(faces) == 0:
+            h_img, w_img = img.shape[:2]
+            face_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            face_resized = cv2.resize(face_rgb, (224, 224))
+            face_array = np.expand_dims(preprocess_input(face_resized.astype("float32")), axis=0)
+            preds = MODEL.predict(face_array, verbose=0)[0]
+            mask_prob, no_mask_prob = float(preds[0]), float(preds[1])
+            is_mask = mask_prob > no_mask_prob
+            label = "Mask" if is_mask else "No Mask"
+            conf = mask_prob if is_mask else no_mask_prob
+            color = (0, 220, 0) if is_mask else (0, 0, 230)
+            cv2.rectangle(processed_img, (0, 0), (w_img, h_img), color, 3)
+            draw_styled_label(processed_img, f"{label}: {conf*100:.1f}%", 10, 30, color)
+            faces.append({"label": label, "confidence": conf, "box": (0, 0, w_img, h_img)})
+
+        # Encode back to base64
+        _, buffer = cv2.imencode('.jpg', processed_img)
+        img_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
+
+        return jsonify({
+            'success': True,
+            'faces': faces,
+            'image_base64': img_base64
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+if __name__ == '__main__':
+    init_ai()
+    print("[INFO] Starting Flask server on http://localhost:5000 ...")
+    app.run(host='0.0.0.0', port=5000, debug=False)
