@@ -51,7 +51,7 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
-            /* No CSS flip on canvas so text renders left-to-right */
+            /* No CSS flip so text renders clearly left-to-right */
         }
         .camera-placeholder {
             display: flex;
@@ -82,14 +82,22 @@
             position: absolute;
             top: 12px;
             left: 12px;
-            background: rgba(15, 23, 42, 0.85);
-            padding: 6px 14px;
+            background: rgba(15, 23, 42, 0.88);
+            padding: 8px 14px;
             border-radius: 8px;
             font-size: 0.85rem;
             font-weight: 600;
             color: #fff;
             border: 1px solid rgba(255, 255, 255, 0.15);
             z-index: 10;
+        }
+        .live-activity-bar {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            font-family: monospace;
         }
     </style>
 </head>
@@ -102,6 +110,7 @@
                 <div>
                     <span class="fw-bold fs-5">Face Mask Detection AI</span>
                     <span class="badge bg-primary ms-2">CNN MobileNetV2</span>
+                    <span class="badge bg-info text-dark ms-1">v2.2 (Live AI)</span>
                 </div>
             </a>
             <div class="d-flex align-items-center gap-3">
@@ -129,8 +138,8 @@
                     <div class="camera-viewport">
                         <!-- HUD Info -->
                         <div id="hudOverlay" class="hud-overlay d-none">
-                            <span id="hudFaces">Faces: 0</span> | 
-                            <span id="hudStatus" class="text-success">Detecting...</span>
+                            <span id="hudFaces" class="fw-bold">Faces: 0</span> | 
+                            <span id="hudStatus" class="text-warning">Starting scan...</span>
                         </div>
 
                         <!-- Live Webcam Video -->
@@ -152,6 +161,11 @@
                         </div>
                     </div>
 
+                    <!-- Live Activity Bar -->
+                    <div class="live-activity-bar mt-2" id="activityBar">
+                        📡 Status: Click "Start Camera" to begin real-time detection.
+                    </div>
+
                     <!-- Control Buttons -->
                     <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
                         <div class="d-flex gap-2">
@@ -159,7 +173,7 @@
                                 <i class="bi bi-camera-video-fill me-1"></i> Start Camera
                             </button>
                             <button id="snapshotBtn" class="btn btn-outline-light btn-action d-none" onclick="triggerSnapshot()">
-                                <i class="bi bi-camera me-1"></i> Instant Scan
+                                <i class="bi bi-camera me-1"></i> Force Scan Frame
                             </button>
                         </div>
                         <div class="text-secondary small">
@@ -232,6 +246,7 @@
         const hudFaces = document.getElementById('hudFaces');
         const hudStatus = document.getElementById('hudStatus');
         const snapshotBtn = document.getElementById('snapshotBtn');
+        const activityBar = document.getElementById('activityBar');
 
         function toggleWebcam() {
             if (isCamActive) {
@@ -243,6 +258,7 @@
 
         async function startWebcam() {
             try {
+                activityBar.innerHTML = '⏳ Requesting camera permission...';
                 streamObj = await navigator.mediaDevices.getUserMedia({
                     video: {
                         width: { ideal: 640 },
@@ -272,13 +288,15 @@
                 camToggleBtn.classList.replace('btn-success', 'btn-danger');
                 camStatusBadge.innerText = 'Live Feed Active';
                 camStatusBadge.classList.replace('bg-secondary', 'bg-success');
+                activityBar.innerHTML = '🟢 Camera active. Initiating AI detection loop...';
                 isCamActive = true;
 
-                // Send frames every 450ms for smooth live updates
+                // Send frames every 450ms
                 detectionInterval = setInterval(detectCurrentFrame, 450);
 
             } catch (err) {
                 console.error("Camera access failed:", err);
+                activityBar.innerHTML = '❌ Camera Access Error: ' + err.message;
                 alert("Could not access camera: " + err.message + "\nPlease check browser camera permissions.");
             }
         }
@@ -304,6 +322,7 @@
             camToggleBtn.classList.replace('btn-danger', 'btn-success');
             camStatusBadge.innerText = 'Camera Off';
             camStatusBadge.classList.replace('bg-success', 'bg-secondary');
+            activityBar.innerHTML = '⏹️ Camera stopped.';
             isCamActive = false;
         }
 
@@ -311,8 +330,10 @@
             if (!isCamActive || isProcessingFrame || video.videoWidth === 0) return;
             isProcessingFrame = true;
 
+            const startTime = performance.now();
+
             try {
-                // Capture at 480px width: tiny payload (~25KB) for fast network upload
+                // Resize to 480px width for fast upload (~25KB payload)
                 const targetW = 480;
                 const aspect = (video.videoHeight || 480) / (video.videoWidth || 640);
                 const targetH = Math.round(targetW * aspect);
@@ -337,13 +358,19 @@
                             body: formData
                         });
                         const data = await response.json();
+                        const duration = Math.round(performance.now() - startTime);
 
                         if (data.success && isCamActive) {
                             drawBoundingBoxes(data.faces, targetW, targetH);
+                            const faceCount = data.faces ? data.faces.length : 0;
+                            const mainLabel = faceCount > 0 ? `${data.faces[0].label} (${(data.faces[0].confidence * 100).toFixed(1)}%)` : 'No face in frame';
+                            activityBar.innerHTML = `⚡ AI Check (${duration}ms) @ ${new Date().toLocaleTimeString()}: Found ${faceCount} face(s) -> <b>${mainLabel}</b>`;
                         } else if (!data.success) {
+                            activityBar.innerHTML = `⚠️ Server returned error: ${data.error}`;
                             console.warn("Backend inference error:", data.error);
                         }
                     } catch (e) {
+                        activityBar.innerHTML = `⚠️ Network request failed: ${e.message}`;
                         console.error("Inference request failed:", e);
                     } finally {
                         isProcessingFrame = false;
@@ -383,13 +410,13 @@
                 const isMask = (face.label === "Mask");
                 if (isMask) maskCount++; else noMaskCount++;
 
-                // Scale to current overlay canvas resolution
+                // Scale coordinates
                 const scaledX1 = x1_raw * scaleX;
                 const scaledX2 = x2_raw * scaleX;
                 const y1 = y1_raw * scaleY;
                 const y2 = y2_raw * scaleY;
 
-                // Adjust for horizontally mirrored video so box aligns with user face
+                // Adjust for horizontally mirrored video
                 const x1 = overlayCanvas.width - scaledX2;
                 const x2 = overlayCanvas.width - scaledX1;
                 const w = x2 - x1;
@@ -397,13 +424,17 @@
 
                 const boxColor = isMask ? "#00e676" : "#ff1744"; // Vivid Green vs Vivid Red
 
-                // Draw bounding box
+                // Semi-transparent glowing box fill
+                ctx.fillStyle = isMask ? "rgba(0, 230, 118, 0.12)" : "rgba(255, 23, 68, 0.12)";
+                ctx.fillRect(x1, y1, w, h);
+
+                // Bounding rectangle
                 ctx.strokeStyle = boxColor;
                 ctx.lineWidth = 3;
                 ctx.strokeRect(x1, y1, w, h);
 
-                // Corner accents for high-tech HUD look
-                const cornerLen = Math.min(w, h) * 0.2;
+                // High-tech corner accents
+                const cornerLen = Math.min(w, h) * 0.22;
                 ctx.lineWidth = 5;
                 // Top-Left
                 ctx.beginPath(); ctx.moveTo(x1, y1 + cornerLen); ctx.lineTo(x1, y1); ctx.lineTo(x1 + cornerLen, y1); ctx.stroke();
@@ -414,27 +445,27 @@
                 // Bottom-Right
                 ctx.beginPath(); ctx.moveTo(x2 - cornerLen, y2); ctx.lineTo(x2, y2); ctx.lineTo(x2, y2 - cornerLen); ctx.stroke();
 
-                // Draw clean label banner above face
+                // Clean label banner
                 const labelText = `${face.label}: ${(face.confidence * 100).toFixed(1)}%`;
                 ctx.font = "bold 16px -apple-system, sans-serif";
                 const textMetrics = ctx.measureText(labelText);
                 const bannerWidth = textMetrics.width + 16;
-                const bannerHeight = 26;
-                const bannerY = Math.max(0, y1 - bannerHeight - 4);
+                const bannerHeight = 28;
+                const bannerY = Math.max(0, y1 - bannerHeight - 6);
 
-                ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+                ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
                 ctx.fillRect(x1, bannerY, bannerWidth, bannerHeight);
 
                 ctx.fillStyle = boxColor;
-                ctx.fillText(labelText, x1 + 8, bannerY + 18);
+                ctx.fillText(labelText, x1 + 8, bannerY + 19);
             });
 
             if (maskCount > 0 && noMaskCount === 0) {
                 hudStatus.innerText = "Mask Worn 😷";
-                hudStatus.className = "text-success";
+                hudStatus.className = "text-success fw-bold";
             } else if (noMaskCount > 0) {
                 hudStatus.innerText = "No Mask Detected ⚠️";
-                hudStatus.className = "text-danger";
+                hudStatus.className = "text-danger fw-bold";
             }
         }
 
