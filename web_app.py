@@ -177,9 +177,7 @@ def predict_image():
         return jsonify({'success': False, 'error': 'No file selected'})
 
     try:
-        in_memory_file = io.BytesIO()
-        file.save(in_memory_file)
-        data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
+        data = np.frombuffer(file.read(), dtype=np.uint8)
         img = cv2.imdecode(data, cv2.IMREAD_COLOR)
 
         if img is None:
