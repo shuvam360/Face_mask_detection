@@ -23,22 +23,44 @@
             border-radius: 14px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
-        .stream-container {
+        .camera-viewport {
             position: relative;
             background: #000;
             border-radius: 12px;
             overflow: hidden;
-            min-height: 380px;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            max-height: 480px;
             display: flex;
             align-items: center;
             justify-content: center;
             border: 2px solid #3b82f6;
+            margin: 0 auto;
         }
-        .stream-img, #browserVideo, #browserCanvas {
+        #webcamVideo {
             width: 100%;
-            height: auto;
-            max-height: 500px;
-            object-fit: contain;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transform: scaleX(-1); /* Mirror camera for natural feel */
+        }
+        #overlayCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transform: scaleX(-1); /* Match mirrored video */
+        }
+        .camera-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+            padding: 30px;
+            text-align: center;
         }
         .badge-status {
             font-size: 0.9rem;
@@ -47,7 +69,7 @@
         }
         .btn-action {
             border-radius: 8px;
-            padding: 8px 16px;
+            padding: 10px 20px;
             font-weight: 600;
         }
         .stat-badge {
@@ -56,8 +78,18 @@
             border-radius: 10px;
             border-left: 4px solid #3b82f6;
         }
-        #browserVideo {
-            display: none;
+        .hud-overlay {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(15, 23, 42, 0.85);
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            z-index: 10;
         }
     </style>
 </head>
@@ -73,53 +105,77 @@
                 </div>
             </a>
             <div class="d-flex align-items-center gap-3">
-                <span class="badge bg-success badge-status"><i class="bi bi-broadcast me-1"></i> System Online</span>
+                <span class="badge bg-success badge-status" id="systemBadge">
+                    <i class="bi bi-broadcast me-1"></i> System Online
+                </span>
             </div>
         </div>
     </nav>
 
-    <!-- Main Content -->
+    <!-- Main Container -->
     <div class="container my-4">
         <div class="row g-4">
-            <!-- Left Column: Video Feed & Webcam -->
+            <!-- Left Column: Camera Viewport -->
             <div class="col-lg-8">
                 <div class="card card-custom p-4">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="fw-bold m-0"><i class="bi bi-camera-video me-2 text-primary"></i>Camera Detection</h5>
-                        <span class="badge bg-secondary" id="feed-status">Ready</span>
+                        <h5 class="fw-bold m-0">
+                            <i class="bi bi-camera-video me-2 text-primary"></i>Live Camera Detection
+                        </h5>
+                        <span class="badge bg-secondary" id="camStatusBadge">Camera Off</span>
                     </div>
 
-                    <div class="stream-container">
-                        <!-- Server Stream -->
-                        <img id="serverStream" class="stream-img" src="/video_feed" alt="Server Camera Feed">
-                        <!-- Browser Client Webcam Display -->
-                        <video id="browserVideo" autoplay playsinline muted></video>
-                        <img id="browserResultImg" class="stream-img d-none" alt="Browser Camera Detection">
-                    </div>
+                    <!-- Viewport Area -->
+                    <div class="camera-viewport">
+                        <!-- HUD Info -->
+                        <div id="hudOverlay" class="hud-overlay d-none">
+                            <span id="hudFaces">Faces: 0</span> | 
+                            <span id="hudStatus" class="text-success">Detecting...</span>
+                        </div>
 
-                    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button id="browserCamBtn" class="btn btn-success btn-action" onclick="toggleBrowserWebcam()">
-                                <i class="bi bi-camera-fill me-1"></i> Use My Device Webcam
+                        <!-- Live Webcam Video -->
+                        <video id="webcamVideo" autoplay playsinline muted class="d-none"></video>
+
+                        <!-- Canvas for AI Bounding Boxes -->
+                        <canvas id="overlayCanvas" class="d-none"></canvas>
+
+                        <!-- Placeholder when Camera is off -->
+                        <div id="camPlaceholder" class="camera-placeholder">
+                            <i class="bi bi-camera-fill text-primary display-3 mb-3"></i>
+                            <h5 class="fw-bold text-white">Your Camera is Currently Inactive</h5>
+                            <p class="text-secondary small mb-3">
+                                Click the button below to allow your browser to access your webcam.
+                            </p>
+                            <button class="btn btn-primary btn-action" onclick="startWebcam()">
+                                <i class="bi bi-play-circle-fill me-1"></i> Start Camera Now
                             </button>
-                            <button id="toggleServerBtn" class="btn btn-outline-light btn-action" onclick="toggleServerStream()">
-                                <i class="bi bi-pause-fill me-1"></i> Toggle Server Stream
+                        </div>
+                    </div>
+
+                    <!-- Control Buttons -->
+                    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                        <div class="d-flex gap-2">
+                            <button id="camToggleBtn" class="btn btn-success btn-action" onclick="toggleWebcam()">
+                                <i class="bi bi-camera-video-fill me-1"></i> Start Camera
+                            </button>
+                            <button id="snapshotBtn" class="btn btn-outline-light btn-action d-none" onclick="triggerSnapshot()">
+                                <i class="bi bi-camera me-1"></i> Quick Analyze
                             </button>
                         </div>
                         <div class="text-secondary small">
-                            <i class="bi bi-shield-check me-1"></i> Works on phone & laptop browsers.
+                            <i class="bi bi-shield-check me-1"></i> Runs safely inside your browser. No video is stored.
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Right Column: Image Upload & Analytics -->
+            <!-- Right Column: Photo Upload & Model Specs -->
             <div class="col-lg-4">
                 <div class="card card-custom p-4 mb-4">
                     <h5 class="fw-bold mb-3"><i class="bi bi-upload me-2 text-primary"></i>Upload Test Photo</h5>
                     <form id="uploadForm" enctype="multipart/form-data">
                         <div class="mb-3">
-                            <label class="form-label text-secondary small">Select an image to detect face masks:</label>
+                            <label class="form-label text-secondary small">Choose a photo from your computer or phone:</label>
                             <input class="form-control bg-dark text-white border-secondary" type="file" id="imageInput" accept="image/*" required>
                         </div>
                         <button type="submit" class="btn btn-primary btn-action w-100" id="uploadBtn">
@@ -148,7 +204,7 @@
                             <div class="fw-semibold">MobileNetV2 Transfer Learning</div>
                         </div>
                         <div class="stat-badge">
-                            <div class="text-secondary small">Classes Detected</div>
+                            <div class="text-secondary small">Detection Classes</div>
                             <div class="fw-semibold text-info">Mask (Green) | No Mask (Red)</div>
                         </div>
                     </div>
@@ -157,101 +213,219 @@
         </div>
     </div>
 
-    <!-- Hidden canvas for capturing browser video frames -->
-    <canvas id="captureCanvas" style="display: none;"></canvas>
+    <!-- Hidden offscreen canvas for capturing frame snapshots -->
+    <canvas id="offscreenCanvas" style="display: none;"></canvas>
 
     <script>
-        let isBrowserCamActive = false;
-        let browserCamInterval = null;
-        let localStream = null;
+        let isCamActive = false;
+        let streamObj = null;
+        let detectionInterval = null;
+        let isProcessingFrame = false;
 
-        const serverStream = document.getElementById('serverStream');
-        const browserVideo = document.getElementById('browserVideo');
-        const browserResultImg = document.getElementById('browserResultImg');
-        const browserCamBtn = document.getElementById('browserCamBtn');
-        const feedStatus = document.getElementById('feed-status');
-        const canvas = document.getElementById('captureCanvas');
+        const video = document.getElementById('webcamVideo');
+        const overlayCanvas = document.getElementById('overlayCanvas');
+        const offscreenCanvas = document.getElementById('offscreenCanvas');
+        const placeholder = document.getElementById('camPlaceholder');
+        const camToggleBtn = document.getElementById('camToggleBtn');
+        const camStatusBadge = document.getElementById('camStatusBadge');
+        const hudOverlay = document.getElementById('hudOverlay');
+        const hudFaces = document.getElementById('hudFaces');
+        const hudStatus = document.getElementById('hudStatus');
+        const snapshotBtn = document.getElementById('snapshotBtn');
 
-        // Toggle device/browser webcam (works on cloud/Render)
-        async function toggleBrowserWebcam() {
-            if (!isBrowserCamActive) {
-                try {
-                    localStream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" } 
-                    });
-                    browserVideo.srcObject = localStream;
-                    serverStream.classList.add('d-none');
-                    browserResultImg.classList.remove('d-none');
-                    browserCamBtn.innerHTML = '<i class="bi bi-stop-circle-fill me-1"></i> Stop Device Webcam';
-                    browserCamBtn.classList.replace('btn-success', 'btn-danger');
-                    feedStatus.innerText = 'Device Camera Active';
-                    feedStatus.classList.replace('bg-secondary', 'bg-success');
-                    isBrowserCamActive = true;
-
-                    // Send frames periodically to AI
-                    browserCamInterval = setInterval(sendBrowserFrame, 600);
-                } catch (err) {
-                    alert('Camera access error: ' + err.message);
-                }
+        function toggleWebcam() {
+            if (isCamActive) {
+                stopWebcam();
             } else {
-                stopBrowserWebcam();
+                startWebcam();
             }
         }
 
-        function stopBrowserWebcam() {
-            if (browserCamInterval) clearInterval(browserCamInterval);
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
+        async function startWebcam() {
+            try {
+                // Request camera permission with ideal mobile & desktop resolutions
+                streamObj = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        facingMode: "user"
+                    },
+                    audio: false
+                });
+
+                video.srcObject = streamObj;
+                await video.play();
+
+                // Show video & overlay, hide placeholder
+                video.classList.remove('d-none');
+                overlayCanvas.classList.remove('d-none');
+                hudOverlay.classList.remove('d-none');
+                snapshotBtn.classList.remove('d-none');
+                placeholder.classList.add('d-none');
+
+                // Adjust overlay canvas internal coordinate resolution to match video
+                video.addEventListener('loadedmetadata', () => {
+                    overlayCanvas.width = video.videoWidth || 640;
+                    overlayCanvas.height = video.videoHeight || 480;
+                }, { once: true });
+
+                overlayCanvas.width = video.videoWidth || 640;
+                overlayCanvas.height = video.videoHeight || 480;
+
+                camToggleBtn.innerHTML = '<i class="bi bi-stop-circle-fill me-1"></i> Stop Camera';
+                camToggleBtn.classList.replace('btn-success', 'btn-danger');
+                camStatusBadge.innerText = 'Live Feed Active';
+                camStatusBadge.classList.replace('bg-secondary', 'bg-success');
+                isCamActive = true;
+
+                // Begin sending frames periodically for AI inference (every 500ms)
+                detectionInterval = setInterval(detectCurrentFrame, 500);
+
+            } catch (err) {
+                console.error("Camera access failed:", err);
+                alert("Could not access camera: " + err.message + "\nPlease make sure you gave camera permissions in your browser.");
             }
-            browserResultImg.classList.add('d-none');
-            serverStream.classList.remove('d-none');
-            browserCamBtn.innerHTML = '<i class="bi bi-camera-fill me-1"></i> Use My Device Webcam';
-            browserCamBtn.classList.replace('btn-danger', 'btn-success');
-            feedStatus.innerText = 'Ready';
-            feedStatus.classList.replace('bg-success', 'bg-secondary');
-            isBrowserCamActive = false;
         }
 
-        async function sendBrowserFrame() {
-            if (!isBrowserCamActive || browserVideo.videoWidth === 0) return;
-            canvas.width = browserVideo.videoWidth;
-            canvas.height = browserVideo.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(browserVideo, 0, 0, canvas.width, canvas.height);
+        function stopWebcam() {
+            if (detectionInterval) clearInterval(detectionInterval);
+            if (streamObj) {
+                streamObj.getTracks().forEach(track => track.stop());
+                streamObj = null;
+            }
 
-            canvas.toBlob(async (blob) => {
-                if (!blob) return;
-                const formData = new FormData();
-                formData.append('file', blob, 'webcam.jpg');
-                try {
-                    const res = await fetch('/predict_image', { method: 'POST', body: formData });
-                    const data = await res.json();
-                    if (data.success && isBrowserCamActive) {
-                        browserResultImg.src = data.image_base64;
+            video.srcObject = null;
+            video.classList.add('d-none');
+            overlayCanvas.classList.add('d-none');
+            hudOverlay.classList.add('d-none');
+            snapshotBtn.classList.add('d-none');
+            placeholder.classList.remove('d-none');
+
+            // Clear canvas
+            const ctx = overlayCanvas.getContext('2d');
+            ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+            camToggleBtn.innerHTML = '<i class="bi bi-camera-video-fill me-1"></i> Start Camera';
+            camToggleBtn.classList.replace('btn-danger', 'btn-success');
+            camStatusBadge.innerText = 'Camera Off';
+            camStatusBadge.classList.replace('bg-success', 'bg-secondary');
+            isCamActive = false;
+        }
+
+        async function detectCurrentFrame() {
+            if (!isCamActive || isProcessingFrame || video.videoWidth === 0) return;
+            isProcessingFrame = true;
+
+            try {
+                // Draw current frame to offscreen canvas
+                offscreenCanvas.width = video.videoWidth;
+                offscreenCanvas.height = video.videoHeight;
+                const offCtx = offscreenCanvas.getContext('2d');
+                offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+
+                // Convert canvas to blob
+                offscreenCanvas.toBlob(async (blob) => {
+                    if (!blob || !isCamActive) {
+                        isProcessingFrame = false;
+                        return;
                     }
-                } catch (e) {
-                    console.error("Frame inference error:", e);
-                }
-            }, 'image/jpeg', 0.7);
-        }
 
-        // Toggle server-side stream
-        let isServerStreaming = true;
-        function toggleServerStream() {
-            if (isBrowserCamActive) stopBrowserWebcam();
-            const btn = document.getElementById('toggleServerBtn');
-            if (isServerStreaming) {
-                serverStream.src = "";
-                btn.innerHTML = '<i class="bi bi-play-fill me-1"></i> Start Server Stream';
-                isServerStreaming = false;
-            } else {
-                serverStream.src = "/video_feed?" + new Date().getTime();
-                btn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> Pause Server Stream';
-                isServerStreaming = true;
+                    const formData = new FormData();
+                    formData.append('file', blob, 'frame.jpg');
+
+                    try {
+                        const response = await fetch('/predict_image', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+
+                        if (data.success && isCamActive) {
+                            drawBoundingBoxes(data.faces);
+                        }
+                    } catch (e) {
+                        console.error("Inference request failed:", e);
+                    } finally {
+                        isProcessingFrame = false;
+                    }
+                }, 'image/jpeg', 0.65);
+
+            } catch (err) {
+                console.error("Frame capture error:", err);
+                isProcessingFrame = false;
             }
         }
 
-        // Photo upload handler
+        function triggerSnapshot() {
+            detectCurrentFrame();
+        }
+
+        function drawBoundingBoxes(faces) {
+            const ctx = overlayCanvas.getContext('2d');
+            ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+            hudFaces.innerText = `Faces: ${faces ? faces.length : 0}`;
+
+            if (!faces || faces.length === 0) {
+                hudStatus.innerText = "No Face Detected";
+                hudStatus.className = "text-secondary";
+                return;
+            }
+
+            let maskCount = 0;
+            let noMaskCount = 0;
+
+            faces.forEach(face => {
+                const [x1, y1, x2, y2] = face.box;
+                const isMask = (face.label === "Mask");
+                if (isMask) maskCount++; else noMaskCount++;
+
+                const boxColor = isMask ? "#00e676" : "#ff1744"; // Vivid Green vs Vivid Red
+                const w = x2 - x1;
+                const h = y2 - y1;
+
+                // Draw bounding box
+                ctx.strokeStyle = boxColor;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x1, y1, w, h);
+
+                // Corner accents
+                const cornerLen = Math.min(w, h) * 0.2;
+                ctx.lineWidth = 5;
+                // Top-Left
+                ctx.beginPath(); ctx.moveTo(x1, y1 + cornerLen); ctx.lineTo(x1, y1); ctx.lineTo(x1 + cornerLen, y1); ctx.stroke();
+                // Top-Right
+                ctx.beginPath(); ctx.moveTo(x2 - cornerLen, y1); ctx.lineTo(x2, y1); ctx.lineTo(x2, y1 + cornerLen); ctx.stroke();
+                // Bottom-Left
+                ctx.beginPath(); ctx.moveTo(x1, y2 - cornerLen); ctx.lineTo(x1, y2); ctx.lineTo(x1 + cornerLen, y2); ctx.stroke();
+                // Bottom-Right
+                ctx.beginPath(); ctx.moveTo(x2 - cornerLen, y2); ctx.lineTo(x2, y2); ctx.lineTo(x2, y2 - cornerLen); ctx.stroke();
+
+                // Label pill banner
+                const labelText = `${face.label}: ${(face.confidence * 100).toFixed(1)}%`;
+                ctx.font = "bold 16px -apple-system, sans-serif";
+                const textMetrics = ctx.measureText(labelText);
+                const bannerWidth = textMetrics.width + 16;
+                const bannerHeight = 26;
+                const bannerY = Math.max(0, y1 - bannerHeight - 4);
+
+                ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+                ctx.fillRect(x1, bannerY, bannerWidth, bannerHeight);
+
+                ctx.fillStyle = boxColor;
+                ctx.fillText(labelText, x1 + 8, bannerY + 18);
+            });
+
+            if (maskCount > 0 && noMaskCount === 0) {
+                hudStatus.innerText = "Mask Worn 😷";
+                hudStatus.className = "text-success";
+            } else if (noMaskCount > 0) {
+                hudStatus.innerText = "No Mask Detected ⚠️";
+                hudStatus.className = "text-danger";
+            }
+        }
+
+        // Photo Upload Handler
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const fileInput = document.getElementById('imageInput');
@@ -259,7 +433,7 @@
 
             const uploadBtn = document.getElementById('uploadBtn');
             uploadBtn.disabled = true;
-            uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Processing...';
+            uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Analyzing...';
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
@@ -270,12 +444,12 @@
                     body: formData
                 });
                 const data = await response.json();
-                
+
                 if (data.success) {
                     document.getElementById('resultImage').src = data.image_base64;
                     const badgesContainer = document.getElementById('resultBadges');
                     badgesContainer.innerHTML = '';
-                    
+
                     data.faces.forEach((face, idx) => {
                         const bgClass = face.label === 'Mask' ? 'bg-success' : 'bg-danger';
                         badgesContainer.innerHTML += `<span class="badge ${bgClass}">Face ${idx+1}: ${face.label} (${(face.confidence*100).toFixed(1)}%)</span>`;
