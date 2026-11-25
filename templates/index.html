@@ -42,7 +42,7 @@
             height: 100%;
             object-fit: cover;
             display: block;
-            transform: scaleX(-1); /* Mirror camera for natural feel */
+            transform: scaleX(-1); /* Mirror camera for natural front view */
         }
         #overlayCanvas {
             position: absolute;
@@ -51,7 +51,7 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
-            transform: scaleX(-1); /* Match mirrored video */
+            /* No CSS flip on canvas so text renders left-to-right */
         }
         .camera-placeholder {
             display: flex;
@@ -159,7 +159,7 @@
                                 <i class="bi bi-camera-video-fill me-1"></i> Start Camera
                             </button>
                             <button id="snapshotBtn" class="btn btn-outline-light btn-action d-none" onclick="triggerSnapshot()">
-                                <i class="bi bi-camera me-1"></i> Quick Analyze
+                                <i class="bi bi-camera me-1"></i> Instant Scan
                             </button>
                         </div>
                         <div class="text-secondary small">
@@ -243,7 +243,6 @@
 
         async function startWebcam() {
             try {
-                // Request camera permission with ideal mobile & desktop resolutions
                 streamObj = await navigator.mediaDevices.getUserMedia({
                     video: {
                         width: { ideal: 640 },
@@ -256,21 +255,18 @@
                 video.srcObject = streamObj;
                 await video.play();
 
-                // Show video & overlay, hide placeholder
                 video.classList.remove('d-none');
                 overlayCanvas.classList.remove('d-none');
                 hudOverlay.classList.remove('d-none');
                 snapshotBtn.classList.remove('d-none');
                 placeholder.classList.add('d-none');
 
-                // Adjust overlay canvas internal coordinate resolution to match video
-                video.addEventListener('loadedmetadata', () => {
+                function updateCanvasSize() {
                     overlayCanvas.width = video.videoWidth || 640;
                     overlayCanvas.height = video.videoHeight || 480;
-                }, { once: true });
-
-                overlayCanvas.width = video.videoWidth || 640;
-                overlayCanvas.height = video.videoHeight || 480;
+                }
+                updateCanvasSize();
+                video.addEventListener('loadedmetadata', updateCanvasSize, { once: true });
 
                 camToggleBtn.innerHTML = '<i class="bi bi-stop-circle-fill me-1"></i> Stop Camera';
                 camToggleBtn.classList.replace('btn-success', 'btn-danger');
@@ -278,12 +274,12 @@
                 camStatusBadge.classList.replace('bg-secondary', 'bg-success');
                 isCamActive = true;
 
-                // Begin sending frames periodically for AI inference (every 500ms)
-                detectionInterval = setInterval(detectCurrentFrame, 500);
+                // Send frames every 450ms for smooth live updates
+                detectionInterval = setInterval(detectCurrentFrame, 450);
 
             } catch (err) {
                 console.error("Camera access failed:", err);
-                alert("Could not access camera: " + err.message + "\nPlease make sure you gave camera permissions in your browser.");
+                alert("Could not access camera: " + err.message + "\nPlease check browser camera permissions.");
             }
         }
 
@@ -301,7 +297,6 @@
             snapshotBtn.classList.add('d-none');
             placeholder.classList.remove('d-none');
 
-            // Clear canvas
             const ctx = overlayCanvas.getContext('2d');
             ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
@@ -317,13 +312,16 @@
             isProcessingFrame = true;
 
             try {
-                // Draw current frame to offscreen canvas
-                offscreenCanvas.width = video.videoWidth;
-                offscreenCanvas.height = video.videoHeight;
-                const offCtx = offscreenCanvas.getContext('2d');
-                offCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+                // Capture at 480px width: tiny payload (~25KB) for fast network upload
+                const targetW = 480;
+                const aspect = (video.videoHeight || 480) / (video.videoWidth || 640);
+                const targetH = Math.round(targetW * aspect);
 
-                // Convert canvas to blob
+                offscreenCanvas.width = targetW;
+                offscreenCanvas.height = targetH;
+                const offCtx = offscreenCanvas.getContext('2d');
+                offCtx.drawImage(video, 0, 0, targetW, targetH);
+
                 offscreenCanvas.toBlob(async (blob) => {
                     if (!blob || !isCamActive) {
                         isProcessingFrame = false;
@@ -341,7 +339,9 @@
                         const data = await response.json();
 
                         if (data.success && isCamActive) {
-                            drawBoundingBoxes(data.faces);
+                            drawBoundingBoxes(data.faces, targetW, targetH);
+                        } else if (!data.success) {
+                            console.warn("Backend inference error:", data.error);
                         }
                     } catch (e) {
                         console.error("Inference request failed:", e);
@@ -360,36 +360,49 @@
             detectCurrentFrame();
         }
 
-        function drawBoundingBoxes(faces) {
+        function drawBoundingBoxes(faces, sampleW, sampleH) {
             const ctx = overlayCanvas.getContext('2d');
             ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
             hudFaces.innerText = `Faces: ${faces ? faces.length : 0}`;
 
             if (!faces || faces.length === 0) {
-                hudStatus.innerText = "No Face Detected";
-                hudStatus.className = "text-secondary";
+                hudStatus.innerText = "Scanning for Face...";
+                hudStatus.className = "text-warning";
                 return;
             }
+
+            const scaleX = overlayCanvas.width / sampleW;
+            const scaleY = overlayCanvas.height / sampleH;
 
             let maskCount = 0;
             let noMaskCount = 0;
 
             faces.forEach(face => {
-                const [x1, y1, x2, y2] = face.box;
+                const [x1_raw, y1_raw, x2_raw, y2_raw] = face.box;
                 const isMask = (face.label === "Mask");
                 if (isMask) maskCount++; else noMaskCount++;
 
-                const boxColor = isMask ? "#00e676" : "#ff1744"; // Vivid Green vs Vivid Red
+                // Scale to current overlay canvas resolution
+                const scaledX1 = x1_raw * scaleX;
+                const scaledX2 = x2_raw * scaleX;
+                const y1 = y1_raw * scaleY;
+                const y2 = y2_raw * scaleY;
+
+                // Adjust for horizontally mirrored video so box aligns with user face
+                const x1 = overlayCanvas.width - scaledX2;
+                const x2 = overlayCanvas.width - scaledX1;
                 const w = x2 - x1;
                 const h = y2 - y1;
+
+                const boxColor = isMask ? "#00e676" : "#ff1744"; // Vivid Green vs Vivid Red
 
                 // Draw bounding box
                 ctx.strokeStyle = boxColor;
                 ctx.lineWidth = 3;
                 ctx.strokeRect(x1, y1, w, h);
 
-                // Corner accents
+                // Corner accents for high-tech HUD look
                 const cornerLen = Math.min(w, h) * 0.2;
                 ctx.lineWidth = 5;
                 // Top-Left
@@ -401,7 +414,7 @@
                 // Bottom-Right
                 ctx.beginPath(); ctx.moveTo(x2 - cornerLen, y2); ctx.lineTo(x2, y2); ctx.lineTo(x2, y2 - cornerLen); ctx.stroke();
 
-                // Label pill banner
+                // Draw clean label banner above face
                 const labelText = `${face.label}: ${(face.confidence * 100).toFixed(1)}%`;
                 ctx.font = "bold 16px -apple-system, sans-serif";
                 const textMetrics = ctx.measureText(labelText);

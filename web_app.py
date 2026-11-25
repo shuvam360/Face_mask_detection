@@ -7,7 +7,8 @@ Features:
 
 Run with:
     python web_app.py
-Then open http://localhost:5000 in your browser.
+Or in production:
+    gunicorn web_app:app
 """
 
 import os
@@ -20,18 +21,20 @@ from flask import Flask, render_template, Response, request, jsonify
 
 # Suppress TensorFlow logging
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
 app = Flask(__name__)
 
-# Global Model & Cascade references
+# Global Model & Cascades
 MODEL = None
 FACE_CASCADE = None
+FACE_CASCADE_ALT = None
 
 
 def init_ai():
-    global MODEL, FACE_CASCADE
+    global MODEL, FACE_CASCADE, FACE_CASCADE_ALT
     # Load Model
     candidate_paths = [
         "mask_detector.h5",
@@ -43,11 +46,16 @@ def init_ai():
             print(f"[INFO] Loading CNN Model from: {p}")
             MODEL = load_model(p)
             break
-    
-    # Load Cascade
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    FACE_CASCADE = cv2.CascadeClassifier(cascade_path)
-    print("[INFO] AI Models loaded successfully.")
+
+    # Load Haar Cascades (both default and alt2 for high sensitivity)
+    try:
+        def_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        alt_path = cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml"
+        FACE_CASCADE = cv2.CascadeClassifier(def_path)
+        FACE_CASCADE_ALT = cv2.CascadeClassifier(alt_path)
+        print("[INFO] AI Models and Face Cascades loaded successfully.")
+    except Exception as e:
+        print(f"[WARNING] Could not load secondary cascade: {e}")
 
 
 def draw_styled_label(frame, text, x, y, color, bg_color=None):
@@ -66,27 +74,46 @@ def draw_styled_label(frame, text, x, y, color, bg_color=None):
     cv2.putText(frame, text, (box_x1 + margin, box_y2 - margin), font, scale, color, thickness, cv2.LINE_AA)
 
 
+def detect_faces_cascade(gray, w_frame, h_frame):
+    """Runs primary and secondary cascade with adaptive thresholds to maximize face recall."""
+    faces = ()
+    # Pass 1: alt2 cascade (best for real-world faces)
+    if FACE_CASCADE_ALT is not None and not FACE_CASCADE_ALT.empty():
+        faces = FACE_CASCADE_ALT.detectMultiScale(
+            gray,
+            scaleFactor=1.06,
+            minNeighbors=3,
+            minSize=(35, 35),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
+
+    # Pass 2: default frontalface cascade fallback
+    if len(faces) == 0 and FACE_CASCADE is not None and not FACE_CASCADE.empty():
+        faces = FACE_CASCADE.detectMultiScale(
+            gray,
+            scaleFactor=1.08,
+            minNeighbors=3,
+            minSize=(35, 35),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
+
+    return faces
+
+
 def process_frame(frame):
     """Processes a frame to detect faces and classify mask status."""
     (h_frame, w_frame) = frame.shape[:2]
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     
-    faces = FACE_CASCADE.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(50, 50),
-        flags=cv2.CASCADE_SCALE_IMAGE
-    )
-
+    faces = detect_faces_cascade(gray, w_frame, h_frame)
     faces_info = []
 
     for (x, y, w, h) in faces:
-        x1, y1 = max(0, x), max(0, y)
-        x2, y2 = min(w_frame, x + w), min(h_frame, y + h)
+        x1, y1 = max(0, int(x)), max(0, int(y))
+        x2, y2 = min(w_frame, int(x + w)), min(h_frame, int(y + h))
 
         face_roi = frame[y1:y2, x1:x2]
-        if face_roi.size == 0 or face_roi.shape[0] < 20 or face_roi.shape[1] < 20:
+        if face_roi.size == 0 or face_roi.shape[0] < 15 or face_roi.shape[1] < 15:
             continue
 
         face_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
@@ -120,36 +147,32 @@ def process_frame(frame):
         label_text = f"{label}: {confidence * 100:.1f}%"
         draw_styled_label(frame, label_text, x1, max(24, y1 - 6), color)
 
+        # Strictly native Python data types for clean JSON serialization
         faces_info.append({
-            "label": label,
-            "confidence": confidence,
-            "box": (x1, y1, x2, y2)
+            "label": str(label),
+            "confidence": float(confidence),
+            "box": [int(x1), int(y1), int(x2), int(y2)]
         })
 
     return frame, faces_info
 
 
 def generate_frames():
-    """Video streaming generator function."""
+    """Server-side video streaming generator function (for local execution)."""
     cap = cv2.VideoCapture(0)
-    
     while True:
         if cap.isOpened():
             success, frame = cap.read()
             if not success:
-                # If frame read failed, send placeholder
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(frame, "Webcam feed temporarily unavailable", (40, 240),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
             else:
                 frame, _ = process_frame(frame)
         else:
-            # Camera couldn't be opened
             frame = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(frame, "No webcam detected on device (Index 0)", (40, 240),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            cv2.putText(frame, "Upload a photo on the right to test detection", (40, 280),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 180, 180), 1)
+            cv2.putText(frame, "Use browser camera button below", (40, 240),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         ret, buffer = cv2.imencode('.jpg', frame)
         frame_bytes = buffer.tobytes()
@@ -185,23 +208,7 @@ def predict_image():
 
         processed_img, faces = process_frame(img)
 
-        # Fallback if no faces were caught by cascade
-        if len(faces) == 0:
-            h_img, w_img = img.shape[:2]
-            face_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            face_resized = cv2.resize(face_rgb, (224, 224))
-            face_array = np.expand_dims(preprocess_input(face_resized.astype("float32")), axis=0)
-            preds = MODEL.predict(face_array, verbose=0)[0]
-            mask_prob, no_mask_prob = float(preds[0]), float(preds[1])
-            is_mask = mask_prob > no_mask_prob
-            label = "Mask" if is_mask else "No Mask"
-            conf = mask_prob if is_mask else no_mask_prob
-            color = (0, 220, 0) if is_mask else (0, 0, 230)
-            cv2.rectangle(processed_img, (0, 0), (w_img, h_img), color, 3)
-            draw_styled_label(processed_img, f"{label}: {conf*100:.1f}%", 10, 30, color)
-            faces.append({"label": label, "confidence": conf, "box": (0, 0, w_img, h_img)})
-
-        # Encode back to base64
+        # Encode back to base64 for image upload preview
         _, buffer = cv2.imencode('.jpg', processed_img)
         img_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode('utf-8')
 
@@ -211,6 +218,7 @@ def predict_image():
             'image_base64': img_base64
         })
     except Exception as e:
+        print(f"[ERROR] predict_image failed: {e}")
         return jsonify({'success': False, 'error': str(e)})
 
 
