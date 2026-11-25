@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Face Mask Detection Live Stream</title>
+    <title>AI Face Mask Detection - Live App</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <style>
@@ -34,10 +34,10 @@
             justify-content: center;
             border: 2px solid #3b82f6;
         }
-        .stream-img {
+        .stream-img, #browserVideo, #browserCanvas {
             width: 100%;
             height: auto;
-            max-height: 520px;
+            max-height: 500px;
             object-fit: contain;
         }
         .badge-status {
@@ -47,7 +47,7 @@
         }
         .btn-action {
             border-radius: 8px;
-            padding: 10px 20px;
+            padding: 8px 16px;
             font-weight: 600;
         }
         .stat-badge {
@@ -55,6 +55,9 @@
             padding: 10px 16px;
             border-radius: 10px;
             border-left: 4px solid #3b82f6;
+        }
+        #browserVideo {
+            display: none;
         }
     </style>
 </head>
@@ -78,29 +81,33 @@
     <!-- Main Content -->
     <div class="container my-4">
         <div class="row g-4">
-            <!-- Left Column: Live Stream & Controls -->
+            <!-- Left Column: Video Feed & Webcam -->
             <div class="col-lg-8">
                 <div class="card card-custom p-4">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="fw-bold m-0"><i class="bi bi-camera-video me-2 text-primary"></i>Live Webcam Feed</h5>
-                        <span class="badge bg-secondary" id="stream-status">Streaming</span>
+                        <h5 class="fw-bold m-0"><i class="bi bi-camera-video me-2 text-primary"></i>Camera Detection</h5>
+                        <span class="badge bg-secondary" id="feed-status">Ready</span>
                     </div>
 
                     <div class="stream-container">
-                        <img id="videoStream" class="stream-img" src="/video_feed" alt="Webcam Feed Loading...">
+                        <!-- Server Stream -->
+                        <img id="serverStream" class="stream-img" src="/video_feed" alt="Server Camera Feed">
+                        <!-- Browser Client Webcam Display -->
+                        <video id="browserVideo" autoplay playsinline muted></video>
+                        <img id="browserResultImg" class="stream-img d-none" alt="Browser Camera Detection">
                     </div>
 
                     <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
-                        <div class="d-flex gap-2">
-                            <button id="toggleBtn" class="btn btn-primary btn-action" onclick="toggleStream()">
-                                <i class="bi bi-pause-fill me-1"></i> Pause Feed
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button id="browserCamBtn" class="btn btn-success btn-action" onclick="toggleBrowserWebcam()">
+                                <i class="bi bi-camera-fill me-1"></i> Use My Device Webcam
                             </button>
-                            <button class="btn btn-outline-light btn-action" onclick="refreshFeed()">
-                                <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+                            <button id="toggleServerBtn" class="btn btn-outline-light btn-action" onclick="toggleServerStream()">
+                                <i class="bi bi-pause-fill me-1"></i> Toggle Server Stream
                             </button>
                         </div>
                         <div class="text-secondary small">
-                            <i class="bi bi-info-circle me-1"></i> Bounding boxes automatically track and classify detected faces.
+                            <i class="bi bi-shield-check me-1"></i> Works on phone & laptop browsers.
                         </div>
                     </div>
                 </div>
@@ -109,20 +116,20 @@
             <!-- Right Column: Image Upload & Analytics -->
             <div class="col-lg-4">
                 <div class="card card-custom p-4 mb-4">
-                    <h5 class="fw-bold mb-3"><i class="bi bi-upload me-2 text-primary"></i>Test Photo Upload</h5>
+                    <h5 class="fw-bold mb-3"><i class="bi bi-upload me-2 text-primary"></i>Upload Test Photo</h5>
                     <form id="uploadForm" enctype="multipart/form-data">
                         <div class="mb-3">
-                            <label class="form-label text-secondary small">Choose a photo from your computer:</label>
+                            <label class="form-label text-secondary small">Select an image to detect face masks:</label>
                             <input class="form-control bg-dark text-white border-secondary" type="file" id="imageInput" accept="image/*" required>
                         </div>
-                        <button type="submit" class="btn btn-success btn-action w-100" id="uploadBtn">
-                            <i class="bi bi-lightning-charge me-1"></i> Analyze Mask
+                        <button type="submit" class="btn btn-primary btn-action w-100" id="uploadBtn">
+                            <i class="bi bi-lightning-charge me-1"></i> Classify Mask
                         </button>
                     </form>
 
                     <!-- Upload Result Preview -->
                     <div id="uploadResult" class="mt-3 d-none">
-                        <h6 class="text-secondary small fw-bold">Analysis Result:</h6>
+                        <h6 class="text-secondary small fw-bold">Analysis Output:</h6>
                         <img id="resultImage" class="w-100 rounded border border-secondary mb-2" src="" alt="Result">
                         <div id="resultBadges" class="d-flex gap-2 flex-wrap"></div>
                     </div>
@@ -133,15 +140,15 @@
                     <h5 class="fw-bold mb-3"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Model Specs</h5>
                     <div class="d-flex flex-column gap-2">
                         <div class="stat-badge">
-                            <div class="text-secondary small">Test Accuracy</div>
+                            <div class="text-secondary small">Test Set Accuracy</div>
                             <div class="fs-4 fw-bold text-success">99.64%</div>
                         </div>
                         <div class="stat-badge">
-                            <div class="text-secondary small">Base Architecture</div>
-                            <div class="fw-semibold">MobileNetV2 (ImageNet)</div>
+                            <div class="text-secondary small">Architecture</div>
+                            <div class="fw-semibold">MobileNetV2 Transfer Learning</div>
                         </div>
                         <div class="stat-badge">
-                            <div class="text-secondary small">Classes</div>
+                            <div class="text-secondary small">Classes Detected</div>
                             <div class="fw-semibold text-info">Mask (Green) | No Mask (Red)</div>
                         </div>
                     </div>
@@ -150,35 +157,101 @@
         </div>
     </div>
 
-    <script>
-        let isStreaming = true;
-        const video = document.getElementById('videoStream');
-        const toggleBtn = document.getElementById('toggleBtn');
-        const streamStatus = document.getElementById('stream-status');
+    <!-- Hidden canvas for capturing browser video frames -->
+    <canvas id="captureCanvas" style="display: none;"></canvas>
 
-        function toggleStream() {
-            if (isStreaming) {
-                video.src = "";
-                toggleBtn.innerHTML = '<i class="bi bi-play-fill me-1"></i> Resume Feed';
-                toggleBtn.classList.replace('btn-primary', 'btn-success');
-                streamStatus.innerText = 'Paused';
-                streamStatus.classList.replace('bg-secondary', 'bg-warning');
-                isStreaming = false;
+    <script>
+        let isBrowserCamActive = false;
+        let browserCamInterval = null;
+        let localStream = null;
+
+        const serverStream = document.getElementById('serverStream');
+        const browserVideo = document.getElementById('browserVideo');
+        const browserResultImg = document.getElementById('browserResultImg');
+        const browserCamBtn = document.getElementById('browserCamBtn');
+        const feedStatus = document.getElementById('feed-status');
+        const canvas = document.getElementById('captureCanvas');
+
+        // Toggle device/browser webcam (works on cloud/Render)
+        async function toggleBrowserWebcam() {
+            if (!isBrowserCamActive) {
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" } 
+                    });
+                    browserVideo.srcObject = localStream;
+                    serverStream.classList.add('d-none');
+                    browserResultImg.classList.remove('d-none');
+                    browserCamBtn.innerHTML = '<i class="bi bi-stop-circle-fill me-1"></i> Stop Device Webcam';
+                    browserCamBtn.classList.replace('btn-success', 'btn-danger');
+                    feedStatus.innerText = 'Device Camera Active';
+                    feedStatus.classList.replace('bg-secondary', 'bg-success');
+                    isBrowserCamActive = true;
+
+                    // Send frames periodically to AI
+                    browserCamInterval = setInterval(sendBrowserFrame, 600);
+                } catch (err) {
+                    alert('Camera access error: ' + err.message);
+                }
             } else {
-                video.src = "/video_feed";
-                toggleBtn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> Pause Feed';
-                toggleBtn.classList.replace('btn-success', 'btn-primary');
-                streamStatus.innerText = 'Streaming';
-                streamStatus.classList.replace('bg-warning', 'bg-secondary');
-                isStreaming = true;
+                stopBrowserWebcam();
             }
         }
 
-        function refreshFeed() {
-            video.src = "/video_feed?" + new Date().getTime();
+        function stopBrowserWebcam() {
+            if (browserCamInterval) clearInterval(browserCamInterval);
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            browserResultImg.classList.add('d-none');
+            serverStream.classList.remove('d-none');
+            browserCamBtn.innerHTML = '<i class="bi bi-camera-fill me-1"></i> Use My Device Webcam';
+            browserCamBtn.classList.replace('btn-danger', 'btn-success');
+            feedStatus.innerText = 'Ready';
+            feedStatus.classList.replace('bg-success', 'bg-secondary');
+            isBrowserCamActive = false;
         }
 
-        // Image upload AJAX
+        async function sendBrowserFrame() {
+            if (!isBrowserCamActive || browserVideo.videoWidth === 0) return;
+            canvas.width = browserVideo.videoWidth;
+            canvas.height = browserVideo.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(browserVideo, 0, 0, canvas.width, canvas.height);
+
+            canvas.toBlob(async (blob) => {
+                if (!blob) return;
+                const formData = new FormData();
+                formData.append('file', blob, 'webcam.jpg');
+                try {
+                    const res = await fetch('/predict_image', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    if (data.success && isBrowserCamActive) {
+                        browserResultImg.src = data.image_base64;
+                    }
+                } catch (e) {
+                    console.error("Frame inference error:", e);
+                }
+            }, 'image/jpeg', 0.7);
+        }
+
+        // Toggle server-side stream
+        let isServerStreaming = true;
+        function toggleServerStream() {
+            if (isBrowserCamActive) stopBrowserWebcam();
+            const btn = document.getElementById('toggleServerBtn');
+            if (isServerStreaming) {
+                serverStream.src = "";
+                btn.innerHTML = '<i class="bi bi-play-fill me-1"></i> Start Server Stream';
+                isServerStreaming = false;
+            } else {
+                serverStream.src = "/video_feed?" + new Date().getTime();
+                btn.innerHTML = '<i class="bi bi-pause-fill me-1"></i> Pause Server Stream';
+                isServerStreaming = true;
+            }
+        }
+
+        // Photo upload handler
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const fileInput = document.getElementById('imageInput');
@@ -215,7 +288,7 @@
                 alert('Request failed: ' + err);
             } finally {
                 uploadBtn.disabled = false;
-                uploadBtn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i> Analyze Mask';
+                uploadBtn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i> Classify Mask';
             }
         });
     </script>

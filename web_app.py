@@ -216,7 +216,11 @@ def predict_image():
         return jsonify({'success': False, 'error': str(e)})
 
 
+# Automatically initialize AI on module load (required for Gunicorn on Render)
+init_ai()
+
+
 if __name__ == '__main__':
-    init_ai()
-    print("[INFO] Starting Flask server on http://localhost:5000 ...")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"[INFO] Starting Flask server on http://localhost:{port} ...")
+    app.run(host='0.0.0.0', port=port, debug=False)
